@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MediaPipe Pose Landmarker Static HTML</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>MediaPipe Pose Landmarker</h1>
+        <p>動画をサーバーへアップロードせず、ブラウザ内で4方向の姿勢ランドマークを解析します。</p>
+      </div>
+      <span class="badge">Static HTML + JavaScript</span>
+    </header>
+
+    <section class="notice">
+      <p><strong>研究データ保護:</strong> 選択した動画はこのページ内で処理され、アプリ側サーバーへ送信されません。GitHub PagesやNetlifyなどの静的ホスティングで公開できます。</p>
+      <p><strong>4方向対応:</strong> 前方、側方、後方、その他の動画を任意に選択できます。少なくとも1つ選択すれば解析できます。</p>
+      <p><strong>長時間動画:</strong> sample fps は通常 2、長時間動画では 0.5〜1 を推奨します。ブラウザ性能、メモリ、動画サイズに処理時間が左右されます。</p>
+      <p><strong>動画形式:</strong> ブラウザ標準の MediaRecorder はChrome/EdgeでWebM出力が最も安定しているため、ランドマーク付き動画は <code>.webm</code> で保存します。</p>
+    </section>
+
+    <section class="panel">
+      <div class="upload-grid">
+        <label>
+          前方動画 front
+          <input id="frontFile" type="file" accept=".mp4,.mov,.avi,.m4v,video/mp4,video/quicktime,video/x-msvideo">
+        </label>
+        <label>
+          側方動画 side
+          <input id="sideFile" type="file" accept=".mp4,.mov,.avi,.m4v,video/mp4,video/quicktime,video/x-msvideo">
+        </label>
+        <label>
+          後方動画 back
+          <input id="backFile" type="file" accept=".mp4,.mov,.avi,.m4v,video/mp4,video/quicktime,video/x-msvideo">
+        </label>
+        <label>
+          その他 other
+          <input id="otherFile" type="file" accept=".mp4,.mov,.avi,.m4v,video/mp4,video/quicktime,video/x-msvideo">
+        </label>
+      </div>
+
+      <div class="settings">
+        <label>
+          sample fps
+          <span class="hint">通常は 2。長時間動画では 0.5〜1 を推奨。</span>
+          <input id="sampleFps" type="number" min="0.1" step="0.1" value="2">
+        </label>
+        <label class="checkbox">
+          <input id="writeOverlay" type="checkbox" checked>
+          ランドマーク付き動画を生成する（推奨）
+        </label>
+        <label>
+          モデルファイル（任意）
+          <span class="hint">通常は自動読込。ローカル直開きで失敗する場合のみ選択。</span>
+          <input id="modelFile" type="file" accept=".task">
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="startBtn" type="button">解析開始</button>
+        <button id="resetBtn" type="button" class="secondary">リセット</button>
+      </div>
+    </section>
+
+    <section class="panel progress-panel">
+      <div class="progress-row">
+        <div>
+          <h2>進捗</h2>
+          <p id="statusText">1つ以上の動画を選択してください。</p>
+        </div>
+        <output id="progressPercent">0%</output>
+      </div>
+      <progress id="progressBar" value="0" max="100"></progress>
+      <pre id="logBox" aria-live="polite"></pre>
+    </section>
+
+    <section class="workspace">
+      <div class="preview">
+        <h2>ランドマーク付きプレビュー</h2>
+        <canvas id="overlayCanvas"></canvas>
+      </div>
+      <div class="downloads">
+        <h2>ダウンロード</h2>
+        <a id="csvLink" class="download disabled" aria-disabled="true">座標CSV（全方向まとめ）</a>
+        <a id="summaryJsonLink" class="download disabled" aria-disabled="true">全体 summary JSON</a>
+        <a id="summaryCsvLink" class="download disabled" aria-disabled="true">全体 summary CSV</a>
+        <a id="overlayLink" class="download disabled" aria-disabled="true">ランドマーク付き動画（1方向時）</a>
+        <a id="zipLink" class="download disabled" aria-disabled="true">ZIP一括ダウンロード</a>
+        <p class="hint">ZIPには <code>coordinates/front/side/back/other</code>, <code>overlays/front/side/back/other</code>, <code>reports/</code> を含めます。</p>
+      </div>
+    </section>
+
+    <video id="sourceVideo" playsinline muted preload="metadata"></video>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
