@@ -11,6 +11,20 @@ const VIEWS = [
   { id: "back", label: "後方", inputId: "backFile" },
   { id: "other", label: "その他", inputId: "otherFile" },
 ];
+const CSV_BOM = "\uFEFF";
+const SUMMARY_JA_HEADERS = [
+  "方向",
+  "元動画ファイル名",
+  "動画長_秒",
+  "sample_fps",
+  "解析対象フレーム数",
+  "ランドマーク検出フレーム数",
+  "検出率_%",
+  "座標CSV",
+  "ランドマーク付き動画",
+  "動画出力状態",
+  "注意",
+];
 
 const LANDMARK_NAMES = [
   "nose",
@@ -244,6 +258,9 @@ async function startAnalysis() {
     outputs: {
       summary_all_json: "reports/summary_all.json",
       summary_all_csv: "reports/summary_all.csv",
+      summary_all_ja_csv: "reports/summary_all_ja.csv",
+      summary_report_ja_html: "reports/summary_report_ja.html",
+      readme_results_ja_txt: "reports/README_RESULTS_ja.txt",
       manifest_json: "reports/manifest.json",
       views: Object.fromEntries(perViewOutputs.map((output) => [
         output.summary.view,
@@ -251,6 +268,7 @@ async function startAnalysis() {
           coordinates_csv: output.paths.coordinatesCsv,
           summary_json: output.paths.summaryJson,
           summary_csv: output.paths.summaryCsv,
+          summary_ja_csv: output.paths.summaryJaCsv,
           overlay_video: output.summary.overlay_video,
         },
       ])),
@@ -261,6 +279,9 @@ async function startAnalysis() {
   const allCoordinatesCsv = toCsv(allCoordinateRows, COORDINATE_HEADERS);
   const summaryAllJson = JSON.stringify(summaryAll, null, 2);
   const summaryAllCsv = toCsv(summaryAll.per_view, Object.keys(summaryAll.per_view[0] || {}));
+  const summaryAllJaCsv = toCsvWithBom(summaryAll.per_view.map(summaryToJapaneseRow), SUMMARY_JA_HEADERS);
+  const summaryReportJaHtml = makeSummaryReportJa(summaryAll);
+  const readmeResultsJa = makeReadmeResultsJa();
   const manifestJson = JSON.stringify(manifest, null, 2);
 
   setDownload(
@@ -289,6 +310,9 @@ async function startAnalysis() {
       perViewOutputs,
       summaryAllJson,
       summaryAllCsv,
+      summaryAllJaCsv,
+      summaryReportJaHtml,
+      readmeResultsJa,
       manifestJson,
     });
     setDownload(
@@ -300,7 +324,8 @@ async function startAnalysis() {
     log("JSZipを読み込めなかったため、ZIP一括ダウンロードは無効です。");
   }
 
-  setStatus(`完了: ${summaryAll.total_detected_frames} / ${summaryAll.total_sampled_frames} フレームで姿勢を検出しました。`, 100);
+  setStatus(`完了: ${summaryAll.total_detected_frames} / ${summaryAll.total_sampled_frames} フレームで姿勢を検出しました。日本語レポートはZIP内の reports/summary_report_ja.html です。`, 100);
+  log("日本語レポート: ZIP内の reports/summary_report_ja.html を開いてください。");
   setBusy(false);
 }
 
@@ -346,6 +371,7 @@ async function analyzeOneVideo({
   const coordinatesFileName = `${view.id}_${baseName}_landmarks_${sampleLabel}.csv`;
   const summaryJsonFileName = `${view.id}_${baseName}_summary.json`;
   const summaryCsvFileName = `${view.id}_${baseName}_summary.csv`;
+  const summaryJaCsvFileName = `${view.id}_${baseName}_summary_ja.csv`;
   const overlayFileName = `${view.id}_${baseName}_landmarked_${sampleLabel}.webm`;
   const coordinateRows = [];
   let detectedFrames = 0;
@@ -440,6 +466,7 @@ async function analyzeOneVideo({
   const coordinatesCsv = toCsv(coordinateRows, COORDINATE_HEADERS);
   const summaryJson = JSON.stringify(summary, null, 2);
   const summaryCsv = toCsv([summary], Object.keys(summary));
+  const summaryJaCsv = toCsvWithBom([summaryToJapaneseRow(summary)], SUMMARY_JA_HEADERS);
   return {
     view,
     coordinateRows,
@@ -447,17 +474,20 @@ async function analyzeOneVideo({
     summary,
     summaryJson,
     summaryCsv,
+    summaryJaCsv,
     overlayBlob,
     filenames: {
       coordinates: coordinatesFileName,
       summaryJson: summaryJsonFileName,
       summaryCsv: summaryCsvFileName,
+      summaryJaCsv: summaryJaCsvFileName,
       overlay: overlayFileName,
     },
     paths: {
       coordinatesCsv: `coordinates/${view.id}/${coordinatesFileName}`,
       summaryJson: `reports/${summaryJsonFileName}`,
       summaryCsv: `reports/${summaryCsvFileName}`,
+      summaryJaCsv: `reports/${summaryJaCsvFileName}`,
       overlay: overlayGenerated ? `overlays/${view.id}/${overlayFileName}` : "",
     },
   };
@@ -655,7 +685,195 @@ function stopOverlayRecorder(overlayRecorder) {
   });
 }
 
-async function makeZip({ perViewOutputs, summaryAllJson, summaryAllCsv, manifestJson }) {
+function summaryToJapaneseRow(summary) {
+  const overlayPath = summary.overlay_video || "なし";
+  const noteParts = ["MediaPipeによる姿勢ランドマーク推定結果です。医学的診断ではありません。"];
+  if (summary.overlay_status === "failed" && summary.overlay_error) {
+    noteParts.push(`ランドマーク付き動画の生成エラー: ${summary.overlay_error}`);
+  }
+  return {
+    "方向": `${summary.view_label || viewLabel(summary.view)} (${summary.view})`,
+    "元動画ファイル名": summary.source_file,
+    "動画長_秒": formatSeconds(summary.duration_sec),
+    "sample_fps": summary.sample_fps,
+    "解析対象フレーム数": summary.sampled_frames,
+    "ランドマーク検出フレーム数": summary.detected_frames,
+    "検出率_%": formatPercent(summary.detection_rate),
+    "座標CSV": summary.coordinates_csv,
+    "ランドマーク付き動画": overlayPath,
+    "動画出力状態": overlayStatusJa(summary.overlay_status),
+    "注意": noteParts.join(" "),
+  };
+}
+
+function makeSummaryReportJa(summaryAll) {
+  const rowsHtml = summaryAll.per_view.map((summary) => {
+    const row = summaryToJapaneseRow(summary);
+    return `<tr>
+      <td>${escapeHtml(row["方向"])}</td>
+      <td>${escapeHtml(row["元動画ファイル名"])}</td>
+      <td>${escapeHtml(row["動画長_秒"])}</td>
+      <td>${escapeHtml(row["sample_fps"])}</td>
+      <td>${escapeHtml(row["解析対象フレーム数"])}</td>
+      <td>${escapeHtml(row["ランドマーク検出フレーム数"])}</td>
+      <td>${escapeHtml(row["検出率_%"])}</td>
+      <td>${escapeHtml(row["座標CSV"])}</td>
+      <td>${escapeHtml(row["ランドマーク付き動画"])}</td>
+      <td>${escapeHtml(row["動画出力状態"])}</td>
+    </tr>`;
+  }).join("");
+
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>MediaPipe Pose Landmarker 解析Summary</title>
+<style>
+body { font-family: Arial, "Yu Gothic", "Meiryo", sans-serif; color: #17202a; margin: 28px; line-height: 1.7; }
+h1 { font-size: 24px; margin-bottom: 8px; }
+h2 { font-size: 18px; margin-top: 24px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid #d7e0e8; padding: 7px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+th { background: #edf3f7; }
+.note { background: #f7fafc; border-left: 4px solid #236192; padding: 10px 12px; }
+code { background: #eef3f7; border-radius: 4px; padding: 1px 4px; }
+</style>
+</head>
+<body>
+<h1>MediaPipe Pose Landmarker 解析Summary</h1>
+<p class="note">これは、ブラウザ上で選択した動画を MediaPipe Pose Landmarker で解析した結果の要約レポートです。動画はアプリ側サーバーへアップロードされず、利用者のブラウザ内で処理されました。</p>
+
+<h2>解析した方向ごとの結果</h2>
+<table>
+<thead>
+<tr>
+<th>方向</th>
+<th>元動画ファイル名</th>
+<th>動画長_秒</th>
+<th>sample fps</th>
+<th>解析対象フレーム数</th>
+<th>ランドマーク検出フレーム数</th>
+<th>検出率</th>
+<th>座標CSV</th>
+<th>ランドマーク付き動画</th>
+<th>動画出力状態</th>
+</tr>
+</thead>
+<tbody>
+${rowsHtml}
+</tbody>
+</table>
+
+<h2>検出率の意味</h2>
+<p>検出率は、解析対象フレーム数のうち MediaPipe が姿勢ランドマークを検出できたフレームの割合です。例: 99.5% は、解析したフレームのほぼ全てでランドマークが検出されたことを示します。</p>
+
+<h2>sample fps の意味</h2>
+<p><code>sample fps</code> は、1秒あたり何フレームを解析対象にするかを示します。値を大きくすると細かく解析できますが、処理時間、CSVサイズ、ZIPサイズ、ブラウザのメモリ使用量が増えます。長時間動画では 0.5〜1 を推奨します。</p>
+
+<h2>ランドマーク付き動画の保存場所</h2>
+<p>ランドマーク付き動画は、ZIP内の <code>overlays/front/</code>, <code>overlays/side/</code>, <code>overlays/back/</code>, <code>overlays/other/</code> に方向別で保存されます。動画形式はブラウザ標準の <code>.webm</code> です。</p>
+
+<h2>座標CSVの保存場所</h2>
+<p>座標CSVは、ZIP内の <code>coordinates/front/</code>, <code>coordinates/side/</code>, <code>coordinates/back/</code>, <code>coordinates/other/</code> に方向別で保存されます。</p>
+
+<h2>注意</h2>
+<p>この結果は医学的診断ではありません。MediaPipeによる姿勢ランドマーク推定結果であり、撮影条件、服装、照明、カメラ角度、遮蔽、ブラウザ性能などの影響を受けます。研究データ・個人情報として適切に管理してください。</p>
+</body>
+</html>`;
+}
+
+function makeReadmeResultsJa() {
+  return `MediaPipe Pose Landmarker 解析結果ZIPの見方
+
+最初に見るファイル:
+  reports/summary_report_ja.html
+    解析結果の日本語HTMLレポートです。どの動画を解析したか、検出率、座標CSV、ランドマーク付き動画の場所を確認できます。
+
+ZIP内の主なフォルダ:
+  coordinates/
+    方向別のランドマーク座標CSVです。front, side, back, other に分かれます。
+
+  overlays/
+    方向別のランドマーク付き動画です。front, side, back, other に分かれます。
+
+  reports/
+    要約CSV、要約JSON、HTMLレポート、manifestが入ります。
+
+主なファイル:
+  reports/summary_all.csv
+    機械処理向けの全体summary CSVです。
+
+  reports/summary_all_ja.csv
+    Excelで開きやすいBOM付き日本語summary CSVです。
+
+  reports/summary_all.json
+    全体summary JSONです。
+
+  reports/summary_report_ja.html
+    利用者向けの日本語HTMLレポートです。
+
+  reports/manifest.json
+    解析条件と出力ファイル一覧です。
+
+.webm について:
+  .webm はブラウザ標準の動画形式です。この静的HTML版では、ブラウザのMediaRecorderを使うため、ランドマーク付き動画は .webm として保存されます。
+
+注意:
+  この結果は医学的診断ではありません。MediaPipeによる姿勢ランドマーク推定結果です。動画、座標CSV、ランドマーク付き動画は研究データ・個人情報に該当する可能性があるため、適切に管理してください。
+`;
+}
+
+function viewLabel(viewId) {
+  return VIEWS.find((view) => view.id === viewId)?.label || viewId;
+}
+
+function overlayStatusJa(status) {
+  if (status === "generated") {
+    return "生成済み";
+  }
+  if (status === "failed") {
+    return "生成失敗";
+  }
+  if (status === "not_requested") {
+    return "未生成";
+  }
+  return status || "";
+}
+
+function formatPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  return `${(numeric * 100).toFixed(1)}%`;
+}
+
+function formatSeconds(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  return numeric.toFixed(2);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function makeZip({
+  perViewOutputs,
+  summaryAllJson,
+  summaryAllCsv,
+  summaryAllJaCsv,
+  summaryReportJaHtml,
+  readmeResultsJa,
+  manifestJson,
+}) {
   const zip = new window.JSZip();
   for (const view of VIEWS) {
     zip.folder(`coordinates/${view.id}`);
@@ -666,12 +884,16 @@ async function makeZip({ perViewOutputs, summaryAllJson, summaryAllCsv, manifest
     zip.file(output.paths.coordinatesCsv, output.coordinatesCsv);
     zip.file(output.paths.summaryJson, output.summaryJson);
     zip.file(output.paths.summaryCsv, output.summaryCsv);
+    zip.file(output.paths.summaryJaCsv, output.summaryJaCsv);
     if (output.overlayBlob?.size && output.paths.overlay) {
       zip.file(output.paths.overlay, output.overlayBlob);
     }
   }
   zip.file("reports/summary_all.json", summaryAllJson);
   zip.file("reports/summary_all.csv", summaryAllCsv);
+  zip.file("reports/summary_all_ja.csv", summaryAllJaCsv);
+  zip.file("reports/summary_report_ja.html", summaryReportJaHtml);
+  zip.file("reports/README_RESULTS_ja.txt", readmeResultsJa);
   zip.file("reports/manifest.json", manifestJson);
   return zip.generateAsync({ type: "blob" });
 }
@@ -683,6 +905,10 @@ function setDownload(link, blob, filename) {
   link.download = filename;
   link.classList.remove("disabled");
   link.setAttribute("aria-disabled", "false");
+}
+
+function toCsvWithBom(rows, headers) {
+  return CSV_BOM + toCsv(rows, headers);
 }
 
 function toCsv(rows, headers) {

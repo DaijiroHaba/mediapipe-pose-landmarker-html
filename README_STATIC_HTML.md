@@ -128,6 +128,57 @@ reports/             各方向summary、全体summary、manifest
 
 `reports/` には、各方向の `*_summary.csv` / `*_summary.json`、全体の `summary_all.csv` / `summary_all.json`、`manifest.json` が入ります。
 
+## Summaryの見方
+
+ZIPを展開したら、まず以下を開いてください。
+
+```text
+reports/summary_report_ja.html
+```
+
+このHTMLレポートには、以下が日本語でまとまっています。
+
+- どの方向の動画を解析したか
+- 元動画ファイル名
+- 動画長
+- sample fps
+- 解析対象フレーム数
+- ランドマーク検出フレーム数
+- 検出率
+- 座標CSVの保存場所
+- ランドマーク付き動画の保存場所
+
+検出率は、解析対象フレームのうち MediaPipe が姿勢ランドマークを検出できた割合です。例えば `99.5%` は、解析対象フレームのほぼ全てでランドマークが検出されたことを意味します。
+
+## Excel文字化け対策
+
+従来の `summary_all.csv` と各方向の `*_summary.csv` は機械処理向けに残しています。Excelで日本語を見やすく開く場合は、BOM付きUTF-8で出力される以下を使ってください。
+
+```text
+reports/summary_all_ja.csv
+reports/<direction>_<元動画名>_summary_ja.csv
+```
+
+日本語Summary CSVの主な列:
+
+- 方向
+- 元動画ファイル名
+- 動画長_秒
+- sample_fps
+- 解析対象フレーム数
+- ランドマーク検出フレーム数
+- 検出率_%
+- 座標CSV
+- ランドマーク付き動画
+- 動画出力状態
+- 注意
+
+ZIP内の簡易説明は以下にも入ります。
+
+```text
+reports/README_RESULTS_ja.txt
+```
+
 ## 現在の制限
 
 - 解析速度と処理可能な動画サイズは、利用者のPC、ブラウザ、メモリ、GPU対応状況に依存します。
